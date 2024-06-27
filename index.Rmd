@@ -1,0 +1,118 @@
+---
+title: "Practice Machine Learning Course Project"
+author: "Meri Galindo"
+date: "2024-06-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+We aim to determine how well a group of participants is performing a specific set of weight lifting exercises by using a dataset from Velloso et al. (http://groupware.les.inf.puc-rio.br/har). The goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants that were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+Class A corresponds to the correct exercise, while the other 4 classes correspond to common mistakes. 
+
+## Load the data
+```{r}
+url1 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+url2 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(url1,destfile="./pml-training.csv")
+download.file(url2,destfile="./pml-testing.csv")
+pmltraining <- read.csv("./pml-training.csv", header=T)
+pmltesting <- read.csv("./pml-testing.csv", header=T)
+```
+
+Explore the data
+```{r}
+# head(pmltraining)
+dim(pmltraining)
+dim(pmltraining)
+# str(pmltraining)
+```
+
+## Prepare data
+The first columns have variables that are not useful to build the model and we can remove. In addition, the data have a lot of NA values that we have to remove or fill in and some variables are the incorrect type. 
+```{r}
+# remove unnecessary variables
+pmltraining2 <- pmltraining[,c(8:160)]
+pmltesting2 <- pmltesting[,c(8:160)]
+
+# remove empty columns
+colNA <- colSums(is.na(pmltesting2))
+pmltraining3 <- pmltraining2[,which(colNA==0)]
+pmltesting3 <- pmltesting2[,which(colNA==0)]
+
+library(ggplot2)
+library(lattice)
+library(caret)
+library(AppliedPredictiveModeling)
+
+# set up classe as factor
+pmltraining3$classe <- as.factor(pmltraining3$classe)
+
+```
+
+## Split the dataset to generate a validation dataset
+The validation dataset is set up from the training set:
+```{r}
+trainIndex <- createDataPartition(pmltraining3$classe, p = 0.75,list=FALSE)
+training <- pmltraining3[trainIndex,]
+validation <- pmltraining3[-trainIndex,]
+
+```
+
+## Generate the models
+We will test 3 general models: Ramdom Forest, Boosted Trees and Linear Discrimination analysis. 
+Since the random forest model takes ~3 hours in my computer, I set up a traincontrol that allows for parallel processing (recommendation from Coursera mentors)
+```{r}
+# Configure parallel processing to speed up the modeling
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 1) 
+registerDoParallel(cluster)
+fitControl <- trainControl(method = "cv",number = 5, allowParallel = TRUE)
+set.seed(5678)
+# Random forest
+rf_model <- train(classe~., data = training, method = "rf", trControl = fitControl)
+confusionMatrix.train(rf_model)
+
+# Boosted trees
+gbm_model <- train(classe~., data = training, method = "gbm", verbose=FALSE, trControl = fitControl)
+confusionMatrix.train(gbm_model)
+
+# Linear discriminant analysis
+lda_model <- train(classe~., data = training, method = "lda", trControl = fitControl)
+confusionMatrix.train(lda_model)
+
+# stop parallel processing
+stopCluster(cluster)
+registerDoSEQ()
+```
+
+## Cross validation
+The random forest has the highest accuracy in the training set. To check how it is doing in the validation set we predict the values and compare with the reality in a confusion matrix:
+```{r}
+rf_predict <- predict(rf_model, newdata = validation)
+confusionMatrix(rf_predict,validation$classe)
+
+gbm_predict <- predict(gbm_model, newdata = validation)
+confusionMatrix(gbm_predict,validation$classe)
+
+lda_predict <- predict(lda_model, newdata = validation)
+confusionMatrix(lda_predict,validation$classe)
+```
+
+Indeed the random forest is the best approach, with an accuracy of 99.55% and out of sample error of 0.45%, indicating that there may be some overfitting.
+After random forest, the boosted trees method is also quite good, with accuracy of 96.47%,  and the least accurate method for this data set is the linear discriminant analysis, with only 70.47% of accuracy.
+
+## Predict the classe on the test dataset
+We use our best model, random forest, to predict the classe on the 20 different test cases provided:
+```{r}
+rf_predict_test <- predict(rf_model, newdata = pmltesting3)
+rf_predict_test
+
+```
+
+As a conclusion, random forest modeling reported that 7 of 20 test cases did the exercises correctly (35%).
